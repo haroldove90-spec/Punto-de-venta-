@@ -123,6 +123,25 @@ export default function App() {
   // Input ref para enfocar la búsqueda automáticamente
   const searchInputRef = useRef<HTMLInputElement>(null);
 
+  // Estados para validación de receta interactiva
+  const [showPrescriptionModal, setShowPrescriptionModal] = useState(false);
+  const [pendingPrescriptionProduct, setPendingPrescriptionProduct] = useState<Product | null>(null);
+  const [doctorName, setDoctorName] = useState('');
+  const [doctorLicense, setDoctorLicense] = useState('');
+  
+  // Array temporal en memoria para guardar las recetas validadas
+  const [prescriptionRecords, setPrescriptionRecords] = useState<Array<{
+    id: string;
+    productId: string;
+    productName: string;
+    doctorName: string;
+    doctorLicense: string;
+    timestamp: Date;
+  }>>([]);
+
+  // Estado para modal de corte de turno
+  const [showShiftCutModal, setShowShiftCutModal] = useState(false);
+
   useEffect(() => {
     const timer = setInterval(() => {
       setCurrentTime(new Date());
@@ -176,7 +195,15 @@ export default function App() {
   const hasPrescriptionMedication = cart.some(item => item.product.requiresPrescription);
 
   // Acciones del Carrito
-  const addToCart = (product: Product) => {
+  const addToCart = (product: Product, bypassPrescription?: boolean) => {
+    if (product.requiresPrescription && !bypassPrescription) {
+      setPendingPrescriptionProduct(product);
+      setDoctorName('');
+      setDoctorLicense('');
+      setShowPrescriptionModal(true);
+      return;
+    }
+
     const existingIndex = cart.findIndex(item => item.product.id === product.id);
     if (existingIndex > -1) {
       const updated = [...cart];
@@ -194,6 +221,31 @@ export default function App() {
         setPrescriptionAlert(null);
       }, 5000);
     }
+  };
+
+  const handleValidatePrescription = () => {
+    if (!pendingPrescriptionProduct) return;
+    if (!doctorName.trim() || !doctorLicense.trim()) {
+      alert("Por favor ingrese de forma obligatoria el Nombre del Médico y la Cédula Profesional.");
+      return;
+    }
+
+    const newRecord = {
+      id: `REC-${Date.now()}`,
+      productId: pendingPrescriptionProduct.id,
+      productName: pendingPrescriptionProduct.name,
+      doctorName: doctorName.trim(),
+      doctorLicense: doctorLicense.trim(),
+      timestamp: new Date()
+    };
+    setPrescriptionRecords(prev => [...prev, newRecord]);
+
+    // Agregar producto al carrito con bypass
+    addToCart(pendingPrescriptionProduct, true);
+
+    // Cerrar modal
+    setShowPrescriptionModal(false);
+    setPendingPrescriptionProduct(null);
   };
 
   const updateQuantity = (productId: string, delta: number) => {
@@ -218,9 +270,9 @@ export default function App() {
 
   const triggerCobrar = () => {
     setPrescriptionVerified({
-      retained: false,
-      doctorValidated: false,
-      dateChecked: false
+      retained: true,
+      doctorValidated: true,
+      dateChecked: true
     });
     setCashReceived('');
     setPaymentMethod('cash');
@@ -228,6 +280,8 @@ export default function App() {
   };
 
   // Confirmar y registrar venta final
+  const [showPrescriptionNotice, setShowPrescriptionNotice] = useState(false);
+
   const handleFinalizeSale = () => {
     const numericCash = parseFloat(cashReceived) || total;
     const change = paymentMethod === 'cash' ? Math.max(0, numericCash - total) : 0;
@@ -246,6 +300,12 @@ export default function App() {
       change: change,
       ticketNumber: ticketNum
     };
+
+    const hasPrescription = cart.some(item => item.product.requiresPrescription);
+    setShowPrescriptionNotice(hasPrescription);
+    if (hasPrescription) {
+      alert("Datos de receta registrados exitosamente.");
+    }
 
     setSalesHistory([newSale, ...salesHistory]);
     setLastSale(newSale);
@@ -319,6 +379,19 @@ export default function App() {
                 {salesHistory.length}
               </span>
             )}
+          </button>
+
+          {/* Botón Corte de Turno */}
+          <button 
+            onClick={() => {
+              // Calcular total y medicamentos controlados antes de mostrar
+              setShowShiftCutModal(true);
+            }}
+            className="bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs px-4 py-2.5 rounded-xl transition-all cursor-pointer flex items-center gap-2 shadow-md hover:shadow-lg"
+            title="Realizar Corte de Caja del Turno"
+          >
+            <Activity className="w-4 h-4 text-white" />
+            <span>Corte de Turno</span>
           </button>
         </div>
       </header>
@@ -858,10 +931,10 @@ export default function App() {
                     (paymentMethod === 'cash' && (parseFloat(cashReceived) || 0) < total) ||
                     (hasPrescriptionMedication && !(prescriptionVerified.retained && prescriptionVerified.doctorValidated && prescriptionVerified.dateChecked))
                   }
-                  className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-sm py-3 rounded-xl transition-all cursor-pointer flex items-center justify-center space-x-2 shadow-lg disabled:opacity-40 disabled:cursor-not-allowed"
+                  className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-sm py-4 rounded-xl transition-all cursor-pointer flex items-center justify-center space-x-2 shadow-lg disabled:opacity-40 disabled:cursor-not-allowed uppercase"
                 >
                   <CheckCircle2 className="w-5 h-5" />
-                  <span>REGISTRAR Y ENTREGAR TICKET</span>
+                  <span>Confirmar Pago</span>
                 </button>
               </div>
             </motion.div>
@@ -1034,6 +1107,14 @@ export default function App() {
                 <p className="text-xs text-slate-500">Imprimiendo ticket térmico...</p>
               </div>
 
+              {/* Mensaje de registro de receta */}
+              {showPrescriptionNotice && (
+                <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold p-3 rounded-xl flex items-center justify-center space-x-2 text-center shadow-xs">
+                  <span className="w-1.5 h-1.5 bg-emerald-600 rounded-full animate-ping flex-shrink-0"></span>
+                  <span>Datos de receta registrados exitosamente</span>
+                </div>
+              )}
+
               {/* Representación de ticket físico */}
               <div className="bg-slate-50 text-slate-900 p-4 rounded-lg border border-slate-200 font-mono text-[10px] space-y-2 max-h-[260px] overflow-y-auto">
                 <div className="text-center space-y-0.5">
@@ -1123,6 +1204,157 @@ export default function App() {
               <X className="w-3.5 h-3.5" />
             </button>
           </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ================= MODAL: VALIDACIÓN DE RECETA (MANDATORIA) ================= */}
+      <AnimatePresence>
+        {showPrescriptionModal && pendingPrescriptionProduct && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-55 animate-fade-in">
+            <motion.div 
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white border-2 border-slate-200 rounded-3xl p-6 max-w-md w-full space-y-6 text-slate-800 shadow-2xl"
+            >
+              <div className="text-center space-y-2">
+                <div className="w-14 h-14 bg-amber-50 border border-amber-200 text-amber-600 rounded-full flex items-center justify-center mx-auto mb-1">
+                  <FileText className="w-8 h-8 text-amber-600" />
+                </div>
+                <h3 className="text-xl font-black text-blue-950 uppercase tracking-tight">Validación Obligatoria de Receta</h3>
+                <p className="text-xs text-slate-500 font-semibold leading-relaxed">
+                  El medicamento <span className="text-amber-600 font-bold">{pendingPrescriptionProduct.name}</span> es un controlado que requiere receta médica física válida.
+                </p>
+              </div>
+
+              <div className="space-y-4">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider block">Nombre Completo del Médico <span className="text-red-500 font-bold">*</span></label>
+                  <input 
+                    type="text"
+                    placeholder="Ej. Dr. Alejandro Gómez"
+                    value={doctorName}
+                    onChange={(e) => setDoctorName(e.target.value)}
+                    className="block w-full p-4 bg-slate-50 border-2 border-slate-200 rounded-xl text-base text-slate-850 font-bold focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-all placeholder:text-slate-300"
+                    required
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider block">Cédula Profesional <span className="text-red-500 font-bold">*</span></label>
+                  <input 
+                    type="text"
+                    placeholder="Ej. 12345678"
+                    value={doctorLicense}
+                    onChange={(e) => setDoctorLicense(e.target.value)}
+                    className="block w-full p-4 bg-slate-50 border-2 border-slate-200 rounded-xl text-base text-slate-850 font-bold focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-all placeholder:text-slate-300"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="flex space-x-3 pt-2">
+                <button 
+                  onClick={() => {
+                    setShowPrescriptionModal(false);
+                    setPendingPrescriptionProduct(null);
+                  }}
+                  className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-3.5 rounded-xl text-xs cursor-pointer text-center border-2 border-slate-200 uppercase transition-all"
+                >
+                  CANCELAR
+                </button>
+                <button 
+                  onClick={handleValidatePrescription}
+                  className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-black py-3.5 rounded-xl text-xs cursor-pointer text-center shadow-md hover:shadow-lg transition-all uppercase"
+                >
+                  VALIDAR RECETA
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* ================= MODAL: CORTE DE TURNO (CORTE DE CAJA) ================= */}
+      <AnimatePresence>
+        {showShiftCutModal && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in">
+            <motion.div 
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white border-2 border-slate-200 rounded-3xl p-6 max-w-md w-full space-y-6 text-slate-850 shadow-2xl"
+            >
+              <div className="text-center space-y-1">
+                <div className="w-14 h-14 bg-emerald-50 border border-emerald-200 text-emerald-600 rounded-full flex items-center justify-center mx-auto mb-1">
+                  <Activity className="w-8 h-8 text-emerald-600" />
+                </div>
+                <h3 className="text-xl font-black text-blue-950 uppercase tracking-tight">Corte de Caja del Turno</h3>
+                <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">Farmacias San Matías</p>
+              </div>
+
+              {/* Contenedor de estadísticas */}
+              <div className="space-y-4">
+                <div className="bg-slate-50 border-2 border-slate-100 p-4 rounded-2xl flex justify-between items-center shadow-xs">
+                  <span className="text-xs font-black text-slate-500 uppercase tracking-wider">Total Vendido en el Turno:</span>
+                  <span className="text-2xl font-black font-mono text-emerald-600">
+                    ${salesHistory.reduce((sum, s) => sum + s.total, 0).toFixed(2)} MXN
+                  </span>
+                </div>
+
+                <div className="space-y-2">
+                  <span className="text-xs font-black text-slate-500 uppercase tracking-wider block">
+                    Medicamentos Controlados con Receta:
+                  </span>
+                  
+                  {(() => {
+                    // Contar todos los medicamentos controlados vendidos en la historia de este turno
+                    const controlledCounts: Record<string, number> = {};
+                    salesHistory.forEach(sale => {
+                      sale.items.forEach(item => {
+                        if (item.product.requiresPrescription) {
+                          controlledCounts[item.product.name] = (controlledCounts[item.product.name] || 0) + item.quantity;
+                        }
+                      });
+                    });
+
+                    const keys = Object.keys(controlledCounts);
+                    if (keys.length === 0) {
+                      return (
+                        <p className="text-xs text-slate-400 italic bg-slate-50 p-3 rounded-xl border-2 border-slate-100 text-center">
+                          No se han vendido medicamentos controlados en este turno.
+                        </p>
+                      );
+                    }
+
+                    return (
+                      <div className="space-y-1.5 max-h-40 overflow-y-auto bg-slate-50 border-2 border-slate-100 rounded-2xl p-3">
+                        {keys.map((name) => (
+                          <div key={name} className="flex justify-between items-center text-xs py-1.5 border-b border-slate-200/40 last:border-0">
+                            <span className="text-slate-700 font-bold flex items-center gap-1.5">
+                              <span className="w-1.5 h-1.5 bg-amber-500 rounded-full"></span>
+                              {name}
+                            </span>
+                            <span className="bg-amber-100 text-amber-800 font-mono font-black px-2 py-0.5 rounded-lg text-[10px]">
+                              {controlledCounts[name]} {controlledCounts[name] === 1 ? 'unidad' : 'unidades'}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()}
+                </div>
+              </div>
+
+              {/* Botón para Cerrar */}
+              <button 
+                onClick={() => setShowShiftCutModal(false)}
+                className="w-full bg-blue-950 hover:bg-blue-900 text-white font-black py-4 rounded-xl text-xs cursor-pointer text-center shadow-md transition-all uppercase tracking-wider animate-pulse"
+              >
+                CERRAR RESUMEN
+              </button>
+            </motion.div>
+          </div>
         )}
       </AnimatePresence>
 
