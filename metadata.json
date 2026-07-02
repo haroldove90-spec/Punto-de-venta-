@@ -1,0 +1,6 @@
+{
+  "name": "Punto de Venta - Farmacias San Matías",
+  "description": "Sistema de Punto de Venta optimizado para farmacias con catálogo de acceso rápido, alertas de receta y control de carrito.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
