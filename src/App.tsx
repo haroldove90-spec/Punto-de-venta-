@@ -21,7 +21,12 @@ import {
   FileText,
   Activity,
   Smartphone,
-  ArrowRight
+  ArrowRight,
+  Edit,
+  Package,
+  Settings,
+  Layers,
+  Coins
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -393,6 +398,25 @@ export default function App() {
   const [newLoteFecha, setNewLoteFecha] = useState('');
   const [newLoteCantidad, setNewLoteCantidad] = useState('10');
 
+  // Estados para la Administración de Inventario, Precios y Stock
+  const [showInventoryModal, setShowInventoryModal] = useState(false);
+  const [inventoryTab, setInventoryTab] = useState<'catalog' | 'form'>('catalog');
+  const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [invSearchQuery, setInvSearchQuery] = useState('');
+
+  // Campos para el Formulario de Producto (Creación / Edición)
+  const [prodFormName, setProdFormName] = useState('');
+  const [prodFormGenericName, setProdFormGenericName] = useState('');
+  const [prodFormPrice, setProdFormPrice] = useState('');
+  const [prodFormCategory, setProdFormCategory] = useState('Analgésicos');
+  const [prodFormRequiresPrescription, setProdFormRequiresPrescription] = useState(false);
+  const [prodFormStock, setProdFormStock] = useState('10');
+  const [prodFormPresentation, setProdFormPresentation] = useState('');
+  const [prodFormImageUrl, setProdFormImageUrl] = useState('');
+  // Lote inicial opcional
+  const [prodFormLoteCodigo, setProdFormLoteCodigo] = useState('');
+  const [prodFormLoteFecha, setProdFormLoteFecha] = useState('');
+
   useEffect(() => {
     const timer = setInterval(() => {
       setCurrentTime(new Date());
@@ -622,6 +646,167 @@ export default function App() {
     } catch (err) {
       console.error('Error al guardar el nuevo lote en IndexedDB:', err);
       alert('Error al guardar el lote en la base de datos.');
+    }
+  };
+
+  // Preparar formulario para agregar producto
+  const openAddProduct = () => {
+    setEditingProduct(null);
+    setProdFormName('');
+    setProdFormGenericName('');
+    setProdFormPrice('');
+    setProdFormCategory('Analgésicos');
+    setProdFormRequiresPrescription(false);
+    setProdFormStock('10');
+    setProdFormPresentation('');
+    setProdFormImageUrl('');
+    setProdFormLoteCodigo('');
+    setProdFormLoteFecha('');
+    setInventoryTab('form');
+  };
+
+  // Preparar formulario para editar producto
+  const openEditProduct = (product: Product) => {
+    setEditingProduct(product);
+    setProdFormName(product.name);
+    setProdFormGenericName(product.genericName);
+    setProdFormPrice(product.price.toString());
+    setProdFormCategory(product.category);
+    setProdFormRequiresPrescription(product.requiresPrescription);
+    setProdFormStock(product.stock.toString());
+    setProdFormPresentation(product.presentation);
+    setProdFormImageUrl(product.imageUrl || '');
+    setProdFormLoteCodigo('');
+    setProdFormLoteFecha('');
+    setInventoryTab('form');
+  };
+
+  // Guardar/Crear Producto en Inventario
+  const handleSaveProduct = async () => {
+    if (!prodFormName.trim() || !prodFormPrice || !prodFormStock) {
+      alert('Por favor complete los campos obligatorios: Nombre, Precio y Stock.');
+      return;
+    }
+
+    const priceNum = parseFloat(prodFormPrice);
+    const stockNum = parseInt(prodFormStock);
+
+    if (isNaN(priceNum) || priceNum < 0) {
+      alert('El precio debe ser un número válido mayor o igual a 0.');
+      return;
+    }
+    if (isNaN(stockNum) || stockNum < 0) {
+      alert('El stock debe ser un número entero válido mayor o igual a 0.');
+      return;
+    }
+
+    try {
+      let updatedProduct: Product;
+      
+      if (editingProduct) {
+        // Modo Edición
+        updatedProduct = {
+          ...editingProduct,
+          name: prodFormName.trim(),
+          genericName: prodFormGenericName.trim(),
+          price: priceNum,
+          category: prodFormCategory,
+          requiresPrescription: prodFormRequiresPrescription,
+          stock: stockNum,
+          presentation: prodFormPresentation.trim(),
+          imageUrl: prodFormImageUrl.trim()
+        };
+
+        // Si agregaron un lote inicial
+        if (prodFormLoteCodigo.trim()) {
+          const newLote: Lote = {
+            codigo: prodFormLoteCodigo.trim().toUpperCase(),
+            fechaCaducidad: prodFormLoteFecha || new Date(Date.now() + 365 * 24 * 3600 * 1000).toISOString().split('T')[0]
+          };
+          const currentLotes = updatedProduct.lotes || [];
+          if (!currentLotes.some(l => l.codigo === newLote.codigo)) {
+            updatedProduct.lotes = [...currentLotes, newLote];
+          }
+        }
+
+        await putInStore('inventario', updatedProduct);
+        
+        // Actualizar estado local
+        setProducts(prev => prev.map(p => p.id === updatedProduct.id ? updatedProduct : p));
+        // Sincronizar en el carrito
+        setCart(prevCart => prevCart.map(item => 
+          item.product.id === updatedProduct.id ? { ...item, product: updatedProduct } : item
+        ));
+
+        alert(`Producto "${updatedProduct.name}" actualizado con éxito en el inventario.`);
+      } else {
+        // Modo Creación
+        const newId = `PROD-${Date.now()}`;
+        
+        // Generar lote si se especifica
+        const lotes: Lote[] = [];
+        if (prodFormLoteCodigo.trim()) {
+          lotes.push({
+            codigo: prodFormLoteCodigo.trim().toUpperCase(),
+            fechaCaducidad: prodFormLoteFecha || new Date(Date.now() + 365 * 24 * 3600 * 1000).toISOString().split('T')[0]
+          });
+        }
+
+        updatedProduct = {
+          id: newId,
+          name: prodFormName.trim(),
+          genericName: prodFormGenericName.trim(),
+          price: priceNum,
+          category: prodFormCategory,
+          requiresPrescription: prodFormRequiresPrescription,
+          stock: stockNum,
+          presentation: prodFormPresentation.trim() || 'Caja / Pieza',
+          imageUrl: prodFormImageUrl.trim(),
+          lotes: lotes
+        };
+
+        await putInStore('inventario', updatedProduct);
+        setProducts(prev => [...prev, updatedProduct]);
+        alert(`Producto "${updatedProduct.name}" registrado con éxito en el inventario.`);
+      }
+
+      // Regresar al catálogo
+      setInventoryTab('catalog');
+      setEditingProduct(null);
+    } catch (err) {
+      console.error('Error al guardar el producto:', err);
+      alert('Error al guardar el producto en IndexedDB.');
+    }
+  };
+
+  // Eliminar Producto del Inventario
+  const handleDeleteProduct = async (productId: string) => {
+    const productToDelete = products.find(p => p.id === productId);
+    if (!productToDelete) return;
+
+    const confirmDelete = window.confirm(`¿Está seguro de que desea eliminar permanentemente el producto "${productToDelete.name}" de su inventario? Esta acción no se puede deshacer.`);
+    if (!confirmDelete) return;
+
+    try {
+      // Eliminar de IndexedDB
+      const db = await initDB();
+      await new Promise<void>((resolve, reject) => {
+        const transaction = db.transaction('inventario', 'readwrite');
+        const store = transaction.objectStore('inventario');
+        const request = store.delete(productId);
+        request.onsuccess = () => resolve();
+        request.onerror = () => reject(request.error);
+      });
+
+      // Actualizar estado local
+      setProducts(prev => prev.filter(p => p.id !== productId));
+      // Quitar del carrito si existe
+      setCart(prev => prev.filter(item => item.product.id !== productId));
+
+      alert('Producto eliminado exitosamente del inventario.');
+    } catch (err) {
+      console.error('Error al eliminar producto de IndexedDB:', err);
+      alert('Error al eliminar el producto de la base de datos.');
     }
   };
 
@@ -858,6 +1043,20 @@ export default function App() {
                 {salesHistory.length}
               </span>
             )}
+          </button>
+
+          {/* Botón Administrar Inventario */}
+          <button 
+            onClick={() => {
+              setInventoryTab('catalog');
+              setShowInventoryModal(true);
+            }}
+            className="bg-slate-700 hover:bg-slate-800 text-white font-extrabold text-[10px] md:text-xs px-2.5 md:px-4 py-2 md:py-2.5 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 md:gap-2 shadow-md hover:shadow-lg"
+            title="Administración de Inventario, Precios y Stock"
+          >
+            <Package className="w-3.5 h-3.5 md:w-4 md:h-4 text-white" />
+            <span className="hidden sm:inline">Inventario & Precios</span>
+            <span className="sm:hidden">Inventario</span>
           </button>
 
           {/* Botón Control de Lotes */}
@@ -2136,6 +2335,444 @@ export default function App() {
         )}
       </AnimatePresence>
  
+      {/* ================= MODAL: ADMINISTRACIÓN DE INVENTARIO, PRECIOS Y STOCK ================= */}
+      <AnimatePresence>
+        {showInventoryModal && (
+          <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+            <motion.div 
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white border-2 border-slate-200 rounded-3xl overflow-hidden shadow-2xl max-w-6xl w-full flex flex-col h-[650px] text-slate-800"
+            >
+              {/* Header del Modal */}
+              <div className="p-5 bg-slate-800 text-white flex items-center justify-between flex-shrink-0">
+                <div className="flex items-center space-x-3">
+                  <div className="w-10 h-10 bg-slate-700 rounded-xl flex items-center justify-center font-bold text-lg text-emerald-400 border border-slate-600">
+                    <Package className="w-5 h-5 animate-pulse" />
+                  </div>
+                  <div>
+                    <h3 className="font-extrabold text-base tracking-tight">Administración Integral de Inventario y Precios</h3>
+                    <p className="text-[10px] text-slate-300 font-bold tracking-widest uppercase">Módulo de Almacén • Farmacias San Matías</p>
+                  </div>
+                </div>
+
+                {/* Selectores de Pestaña */}
+                <div className="flex bg-slate-700 p-1 rounded-xl border border-slate-600">
+                  <button 
+                    onClick={() => setInventoryTab('catalog')}
+                    className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${inventoryTab === 'catalog' ? 'bg-emerald-600 text-white shadow' : 'text-slate-300 hover:text-white'}`}
+                  >
+                    Ver Catálogo
+                  </button>
+                  <button 
+                    onClick={openAddProduct}
+                    className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${inventoryTab === 'form' && !editingProduct ? 'bg-emerald-600 text-white shadow' : 'text-slate-300 hover:text-white'}`}
+                  >
+                    + Nuevo Producto
+                  </button>
+                </div>
+
+                <button 
+                  onClick={() => setShowInventoryModal(false)}
+                  className="text-slate-300 hover:text-white bg-white/10 hover:bg-white/20 p-2 rounded-xl transition-all cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Cuerpo del Modal */}
+              <div className="flex-1 flex flex-col overflow-hidden bg-slate-50">
+                {inventoryTab === 'catalog' ? (
+                  <div className="flex-1 flex flex-col overflow-hidden p-6 space-y-6">
+                    
+                    {/* Bento Grid: Métricas de Inventario */}
+                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 flex-shrink-0">
+                      <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex items-center space-x-4">
+                        <div className="w-10 h-10 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center">
+                          <Package className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider block">Catálogo Total</span>
+                          <span className="text-xl font-black text-blue-950 font-mono">{products.length} <span className="text-xs font-normal font-sans text-slate-400">ítems</span></span>
+                        </div>
+                      </div>
+
+                      <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex items-center space-x-4">
+                        <div className="w-10 h-10 bg-emerald-50 text-emerald-600 rounded-xl flex items-center justify-center">
+                          <Coins className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider block">Valor de Inventario</span>
+                          <span className="text-xl font-black text-emerald-600 font-mono">
+                            ${products.reduce((sum, p) => sum + (p.price * p.stock), 0).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex items-center space-x-4">
+                        <div className="w-10 h-10 bg-amber-50 text-amber-600 rounded-xl flex items-center justify-center">
+                          <AlertTriangle className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider block">Stock Crítico (≤ 5)</span>
+                          <span className="text-xl font-black text-amber-600 font-mono">
+                            {products.filter(p => p.stock <= 5).length} <span className="text-xs font-normal font-sans text-slate-400">pzas</span>
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex items-center space-x-4">
+                        <div className="w-10 h-10 bg-purple-50 text-purple-600 rounded-xl flex items-center justify-center">
+                          <FileText className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider block">Medicamentos Controlados</span>
+                          <span className="text-xl font-black text-purple-600 font-mono">
+                            {products.filter(p => p.requiresPrescription).length} <span className="text-xs font-normal font-sans text-slate-400">fórmulas</span>
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Barra de Filtro y Buscador */}
+                    <div className="flex justify-between items-center bg-white p-3 rounded-2xl border border-slate-200 shadow-sm flex-shrink-0">
+                      <div className="relative w-80">
+                        <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                        <input 
+                          type="text" 
+                          placeholder="Buscar por nombre o sustancia activa..."
+                          value={invSearchQuery}
+                          onChange={(e) => setInvSearchQuery(e.target.value)}
+                          className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all outline-none"
+                        />
+                      </div>
+                      
+                      <button 
+                        onClick={openAddProduct}
+                        className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black px-4 py-2.5 rounded-xl transition-all cursor-pointer flex items-center gap-2 shadow-md hover:shadow-lg"
+                      >
+                        <Plus className="w-4 h-4" />
+                        <span>AGREGAR MEDICAMENTO</span>
+                      </button>
+                    </div>
+
+                    {/* Tabla de Productos con Scroll */}
+                    <div className="flex-1 bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden flex flex-col">
+                      <div className="overflow-x-auto w-full flex-1">
+                        <table className="w-full text-left border-collapse">
+                          <thead className="bg-slate-50 border-b border-slate-200 sticky top-0 z-10 text-[10px] font-black uppercase tracking-wider text-slate-400">
+                            <tr>
+                              <th className="py-3 px-4">Medicamento</th>
+                              <th className="py-3 px-4">Categoría</th>
+                              <th className="py-3 px-4 text-right">Precio de Venta</th>
+                              <th className="py-3 px-4 text-center">Stock Disponible</th>
+                              <th className="py-3 px-4 text-center">Tipo de Venta</th>
+                              <th className="py-3 px-4 text-center">Acciones</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100 text-xs">
+                            {(() => {
+                              const list = products.filter(p => 
+                                p.name.toLowerCase().includes(invSearchQuery.toLowerCase()) ||
+                                p.genericName.toLowerCase().includes(invSearchQuery.toLowerCase())
+                              );
+
+                              if (list.length === 0) {
+                                return (
+                                  <tr>
+                                    <td colSpan={6} className="py-8 text-center text-slate-400 italic">
+                                      No se encontraron medicamentos en el catálogo.
+                                    </td>
+                                  </tr>
+                                );
+                              }
+
+                              return list.map(product => {
+                                const isLow = product.stock <= 5;
+                                const isOut = product.stock === 0;
+                                return (
+                                  <tr key={product.id} className="hover:bg-slate-50/50 transition-colors">
+                                    {/* Medicamento info */}
+                                    <td className="py-3 px-4">
+                                      <div className="flex items-center space-x-3">
+                                        <div className="w-9 h-9 bg-slate-50 rounded-lg flex-shrink-0 flex items-center justify-center border border-slate-100">
+                                          {product.imageUrl ? (
+                                            <img 
+                                              src={product.imageUrl} 
+                                              alt={product.name} 
+                                              referrerPolicy="no-referrer"
+                                              className="w-full h-full object-contain p-1 mix-blend-multiply"
+                                            />
+                                          ) : (
+                                            <Activity className="w-4 h-4 text-slate-300" />
+                                          )}
+                                        </div>
+                                        <div>
+                                          <span className="font-extrabold text-blue-950 uppercase tracking-tight block">{product.name}</span>
+                                          <span className="text-[10px] text-slate-400 block max-w-[200px] truncate">{product.genericName}</span>
+                                          <span className="text-[9px] text-slate-500 font-mono">{product.presentation}</span>
+                                        </div>
+                                      </div>
+                                    </td>
+                                    
+                                    {/* Categoría */}
+                                    <td className="py-3 px-4 font-semibold text-slate-600">
+                                      {product.category}
+                                    </td>
+
+                                    {/* Precio */}
+                                    <td className="py-3 px-4 text-right font-black font-mono text-blue-950 text-sm">
+                                      ${product.price.toFixed(2)}
+                                    </td>
+
+                                    {/* Stock */}
+                                    <td className="py-3 px-4 text-center">
+                                      <span className={`inline-flex items-center px-2.5 py-1 rounded-full font-mono font-black text-[11px] border ${
+                                        isOut ? 'bg-red-50 text-red-600 border-red-200' :
+                                        isLow ? 'bg-amber-50 text-amber-600 border-amber-200' :
+                                        'bg-slate-50 text-slate-700 border-slate-200'
+                                      }`}>
+                                        <span className={`w-1.5 h-1.5 rounded-full mr-1.5 ${
+                                          isOut ? 'bg-red-500 animate-pulse' :
+                                          isLow ? 'bg-amber-500 animate-pulse' :
+                                          'bg-slate-400'
+                                        }`} />
+                                        {product.stock} pzas
+                                      </span>
+                                    </td>
+
+                                    {/* Tipo de Venta */}
+                                    <td className="py-3 px-4 text-center">
+                                      {product.requiresPrescription ? (
+                                        <span className="bg-amber-100 text-amber-800 text-[9px] font-black px-2 py-0.5 rounded-md uppercase border border-amber-200">
+                                          Receta Obligatoria
+                                        </span>
+                                      ) : (
+                                        <span className="bg-emerald-50 text-emerald-800 text-[9px] font-bold px-2 py-0.5 rounded-md uppercase border border-emerald-100">
+                                          Venta Libre
+                                        </span>
+                                      )}
+                                    </td>
+
+                                    {/* Acciones */}
+                                    <td className="py-3 px-4 text-center">
+                                      <div className="flex items-center justify-center space-x-2">
+                                        <button 
+                                          onClick={() => openEditProduct(product)}
+                                          className="p-1.5 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-lg border border-blue-100 transition-all cursor-pointer"
+                                          title="Editar Medicamento"
+                                        >
+                                          <Edit className="w-3.5 h-3.5" />
+                                        </button>
+                                        <button 
+                                          onClick={() => handleDeleteProduct(product.id)}
+                                          className="p-1.5 bg-red-50 text-red-600 hover:bg-red-100 rounded-lg border border-red-100 transition-all cursor-pointer"
+                                          title="Eliminar del Catálogo"
+                                        >
+                                          <Trash2 className="w-3.5 h-3.5" />
+                                        </button>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                );
+                              });
+                            })()}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+
+                  </div>
+                ) : (
+                  /* Formulario de Alta y Edición */
+                  <div className="flex-1 flex flex-col justify-between overflow-hidden p-6">
+                    <div className="flex-1 overflow-y-auto space-y-6 pr-2">
+                      <div>
+                        <h4 className="text-sm font-black text-blue-900 uppercase tracking-wider">
+                          {editingProduct ? `Editar Medicamento: ${editingProduct.name}` : 'Registrar Nuevo Medicamento'}
+                        </h4>
+                        <p className="text-[10px] text-slate-400 mt-0.5">
+                          Ingrese la información técnica del medicamento. Los datos se guardarán de forma permanente en la base de datos local IndexedDB.
+                        </p>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        {/* Columna Izquierda: Datos del Medicamento */}
+                        <div className="space-y-4">
+                          <h5 className="text-xs font-black text-slate-600 uppercase border-b pb-1">Datos Clínicos y Comerciales</h5>
+                          
+                          <div className="space-y-1">
+                            <label className="text-[10px] font-bold text-slate-500 uppercase">Nombre Comercial del Medicamento <span className="text-red-500 font-bold">*</span></label>
+                            <input 
+                              type="text" 
+                              placeholder="Ej. Paracetamol Tempra" 
+                              value={prodFormName}
+                              onChange={(e) => setProdFormName(e.target.value)}
+                              className="w-full p-3 border border-slate-300 rounded-xl text-xs font-semibold bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all outline-none"
+                              required
+                            />
+                          </div>
+
+                          <div className="space-y-1">
+                            <label className="text-[10px] font-bold text-slate-500 uppercase">Sustancia Activa / Nombre Genérico</label>
+                            <input 
+                              type="text" 
+                              placeholder="Ej. Analgésico 500mg" 
+                              value={prodFormGenericName}
+                              onChange={(e) => setProdFormGenericName(e.target.value)}
+                              className="w-full p-3 border border-slate-300 rounded-xl text-xs font-semibold bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all outline-none"
+                            />
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-4">
+                            <div className="space-y-1">
+                              <label className="text-[10px] font-bold text-slate-500 uppercase">Categoría:</label>
+                              <select 
+                                value={prodFormCategory} 
+                                onChange={(e) => setProdFormCategory(e.target.value)}
+                                className="w-full p-3 border border-slate-300 rounded-xl text-xs font-semibold bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all outline-none"
+                              >
+                                {CATEGORIES.filter(c => c !== 'Todos').map(c => (
+                                  <option key={c} value={c}>{c}</option>
+                                ))}
+                              </select>
+                            </div>
+
+                            <div className="space-y-1">
+                              <label className="text-[10px] font-bold text-slate-500 uppercase">Presentación / Formato:</label>
+                              <input 
+                                type="text" 
+                                placeholder="Ej. Caja con 20 tabletas" 
+                                value={prodFormPresentation}
+                                onChange={(e) => setProdFormPresentation(e.target.value)}
+                                className="w-full p-3 border border-slate-300 rounded-xl text-xs font-semibold bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all outline-none"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="space-y-1">
+                            <label className="text-[10px] font-bold text-slate-500 uppercase">URL de Imagen del Producto (Opcional):</label>
+                            <input 
+                              type="text" 
+                              placeholder="Ej. https://url-de-la-imagen.jpg" 
+                              value={prodFormImageUrl}
+                              onChange={(e) => setProdFormImageUrl(e.target.value)}
+                              className="w-full p-3 border border-slate-300 rounded-xl text-xs font-semibold bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all outline-none"
+                            />
+                          </div>
+                        </div>
+
+                        {/* Columna Derecha: Control de Stock, Precios y Lotes */}
+                        <div className="space-y-4">
+                          <h5 className="text-xs font-black text-slate-600 uppercase border-b pb-1">Precios, Inventario y Lotes</h5>
+
+                          <div className="grid grid-cols-2 gap-4">
+                            <div className="space-y-1">
+                              <label className="text-[10px] font-bold text-slate-500 uppercase">Precio de Venta ($ MXN) <span className="text-red-500 font-bold">*</span></label>
+                              <input 
+                                type="number" 
+                                min="0.01" 
+                                step="0.01" 
+                                placeholder="Ej. 45.00" 
+                                value={prodFormPrice}
+                                onChange={(e) => setProdFormPrice(e.target.value)}
+                                className="w-full p-3 border border-slate-300 rounded-xl text-xs font-semibold bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all outline-none font-mono"
+                                required
+                              />
+                            </div>
+
+                            <div className="space-y-1">
+                              <label className="text-[10px] font-bold text-slate-500 uppercase">Stock Físico <span className="text-red-500 font-bold">*</span></label>
+                              <input 
+                                type="number" 
+                                min="0" 
+                                placeholder="Ej. 50" 
+                                value={prodFormStock}
+                                onChange={(e) => setProdFormStock(e.target.value)}
+                                className="w-full p-3 border border-slate-300 rounded-xl text-xs font-semibold bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all outline-none font-mono"
+                                required
+                              />
+                            </div>
+                          </div>
+
+                          {/* Requiere Receta Toggle */}
+                          <div className="bg-white p-3.5 rounded-2xl border border-slate-200 flex items-center justify-between shadow-sm">
+                            <div>
+                              <label className="text-xs font-extrabold text-blue-950 uppercase block">Requiere Receta Médica</label>
+                              <span className="text-[10px] text-slate-400 leading-none">Medicamentos antibióticos o controlados.</span>
+                            </div>
+                            <input 
+                              type="checkbox" 
+                              checked={prodFormRequiresPrescription}
+                              onChange={(e) => setProdFormRequiresPrescription(e.target.checked)}
+                              className="w-5 h-5 text-emerald-600 focus:ring-emerald-500 border-slate-300 rounded cursor-pointer"
+                            />
+                          </div>
+
+                          {/* Sección Lote Inicial (Opcional) */}
+                          <div className="bg-blue-50/50 p-4 rounded-2xl border border-blue-100/80 space-y-3">
+                            <div>
+                              <h6 className="text-[10px] font-black text-blue-900 uppercase">Vincular Lote de Caducidad (Opcional)</h6>
+                              <p className="text-[9px] text-slate-400 leading-tight">Registre un lote inicial para este medicamento para habilitar las alertas del semáforo de caducidades.</p>
+                            </div>
+                            <div className="grid grid-cols-2 gap-3">
+                              <div className="space-y-1">
+                                <label className="text-[9px] font-bold text-slate-500 uppercase">Código de Lote:</label>
+                                <input 
+                                  type="text" 
+                                  placeholder="Ej. LT-NEW-01" 
+                                  value={prodFormLoteCodigo}
+                                  onChange={(e) => setProdFormLoteCodigo(e.target.value.toUpperCase())}
+                                  className="w-full p-2 border border-slate-300 rounded-lg text-[11px] bg-white font-mono focus:ring-2 focus:ring-blue-500/20 transition-all outline-none"
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <label className="text-[9px] font-bold text-slate-500 uppercase">Fecha de Caducidad:</label>
+                                <input 
+                                  type="date" 
+                                  value={prodFormLoteFecha}
+                                  onChange={(e) => setProdFormLoteFecha(e.target.value)}
+                                  className="w-full p-2 border border-slate-300 rounded-lg text-[11px] bg-white focus:ring-2 focus:ring-blue-500/20 transition-all outline-none"
+                                />
+                              </div>
+                            </div>
+                          </div>
+
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Footer de Acciones del Formulario */}
+                    <div className="pt-4 border-t border-slate-200 flex justify-end space-x-3 flex-shrink-0">
+                      <button 
+                        type="button"
+                        onClick={() => {
+                          setInventoryTab('catalog');
+                          setEditingProduct(null);
+                        }}
+                        className="px-5 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs uppercase border-2 border-slate-200 transition-all cursor-pointer"
+                      >
+                        CANCELAR
+                      </button>
+                      <button 
+                        type="button"
+                        onClick={handleSaveProduct}
+                        className="px-6 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-black rounded-xl text-xs uppercase shadow-md shadow-emerald-100 transition-all cursor-pointer"
+                      >
+                        {editingProduct ? 'GUARDAR CAMBIOS' : 'REGISTRAR MEDICAMENTO'}
+                      </button>
+                    </div>
+
+                  </div>
+                )}
+              </div>
+
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       {/* ================= MODAL: CONTROL DE LOTES (INTERACTIVO) ================= */}
       <AnimatePresence>
         {showLotesModal && (
